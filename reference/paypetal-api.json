@@ -51,13 +51,13 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "property1": {
+                  "base64Hashed": {
                     "type": "string",
-                    "default": "base64Hashed"
+                    "default": "UFBUTC1zZWNfNTI1MGUxNTAzMjVhNDI0NThiNTctWDphcHBfYTIzMDA4MGE0YmVjNDAxOThmZDItWA=="
                   }
                 },
                 "required": [
-                  "property1"
+                  "base64Hashed"
                 ]
               }
             }
