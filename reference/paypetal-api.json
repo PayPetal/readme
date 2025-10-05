@@ -12,16 +12,36 @@
   "tags": [],
   "paths": {
     "/api/auth/login": {
-      "get": {
+      "post": {
         "summary": "New Endpoint",
         "description": "This is your first endpoint! Edit this page to start documenting your API.",
         "operationId": "get_new-endpoint",
         "responses": {
           "200": {
-            "description": "Successful response"
+            "description": "",
+            "content": {}
           }
         },
-        "parameters": []
+        "parameters": [],
+        "security": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "property1": {
+                    "type": "string",
+                    "default": "base64Hashed"
+                  }
+                },
+                "required": [
+                  "property1"
+                ]
+              }
+            }
+          }
+        }
       }
     }
   },
