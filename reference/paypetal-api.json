@@ -91,6 +91,18 @@
           }
         }
       }
+    },
+    "/api/v1/customer": {
+      "post": {
+        "description": "",
+        "operationId": "post_apiv1customer",
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "parameters": []
+      }
     }
   },
   "components": {
