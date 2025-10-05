@@ -201,18 +201,7 @@ paths:
             '*/*':
               schema:
                 $ref: '#/components/schemas/ApiResponseObject'
-  /docs:
-    get:
-      tags:
-        - welcome
-      operationId: WelcomePaage
-      responses:
-        '200':
-          description: OK
-          content:
-            '*/*':
-              schema:
-                type: object
+  /docs: {}
   /api/v1/transaction/{id}:
     get:
       tags:
