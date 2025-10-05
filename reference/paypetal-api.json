@@ -101,7 +101,45 @@
             "description": ""
           }
         },
-        "parameters": []
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Content-Type",
+            "schema": {
+              "type": "string",
+              "default": "application/json"
+            },
+            "required": true
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "fullname": {
+                    "type": "string",
+                    "default": "Samson"
+                  },
+                  "email": {
+                    "type": "string",
+                    "default": "samson@gmail.com"
+                  },
+                  "phoneNumber": {
+                    "type": "string",
+                    "default": "08022498362"
+                  }
+                },
+                "required": [
+                  "fullname",
+                  "email",
+                  "phoneNumber"
+                ]
+              }
+            }
+          }
+        }
       }
     }
   },
