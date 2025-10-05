@@ -19,7 +19,28 @@
         "responses": {
           "200": {
             "description": "",
-            "content": {}
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {}
+                },
+                "examples": {
+                  "New Example": {
+                    "summary": "New Example",
+                    "value": {
+                      "status": true,
+                      "statusCode": "00",
+                      "message": "Successful",
+                      "dataResponse": {
+                        "accessToken": "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJpTlBPR3NYSDF1cFppbVlhQXB3a2VkeXJIWnk3b3F0eW1CNGhDcEZqOHlVPSIsImlhdCI6MTc1OTYxODgwNiwiZXhwIjoxNzYwMjIzNjA2fQ.SS5lu7qYoSnxJyifE1nwxLAUeqLlfxCxcLEg7eugm4A",
+                        "expireAt": "2025-10-11T23:00:06.951+00:00"
+                      }
+                    }
+                  }
+                }
+              }
+            }
           }
         },
         "parameters": [],
