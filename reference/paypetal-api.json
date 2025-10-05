@@ -11,7 +11,7 @@
   ],
   "tags": [],
   "paths": {
-    "/new-endpoint": {
+    "/api/auth/login": {
       "get": {
         "summary": "New Endpoint",
         "description": "This is your first endpoint! Edit this page to start documenting your API.",
@@ -20,7 +20,8 @@
           "200": {
             "description": "Successful response"
           }
-        }
+        },
+        "parameters": []
       }
     }
   },
