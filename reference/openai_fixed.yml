@@ -280,6 +280,9 @@ paths:
             '*/*':
               schema:
                 type: object
+      parameters: []
+      security:
+        - BearerAuth: []
   /api/v1/customer/delete/{customerId}:
     delete:
       tags:
