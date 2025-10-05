@@ -10,4 +10,7 @@ api:
   file: openai_fixed.yml
   operationId: login
 hidden: false
+link:
+  new_tab: false
 ---
+<br />
