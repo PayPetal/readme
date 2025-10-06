@@ -206,6 +206,29 @@
           }
         ]
       }
+    },
+    "/api/v1/customer/{customerId}": {
+      "get": {
+        "description": "",
+        "operationId": "get_apiv1customer{customerId}",
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "parameters": [
+          {
+            "in": "path",
+            "name": "customerId",
+            "schema": {
+              "type": "string",
+              "default": "cust_2ad485xzkvvv7n"
+            },
+            "required": true,
+            "description": "The ID of the customer record you want to update."
+          }
+        ]
+      }
     }
   },
   "components": {
