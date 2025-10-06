@@ -9,6 +9,11 @@ link:
   new_tab: false
 metadata:
   robots: index
+next:
+  pages:
+    - slug: update-a-customer
+      title: Update a Customer
+      type: endpoint
 ---
 This endpoint registers a new customer under your merchant account.
 A customer must exist before you can create an escrow agreement or process payments on their behalf.
