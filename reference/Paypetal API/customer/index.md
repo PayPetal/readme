@@ -10,10 +10,21 @@ next:
       title: Create Customer
       type: endpoint
 ---
-The Customers API allows you to create, read, update, and delete customer records in your PayPetal Merchant account.
-These endpoints help you manage your customer base for escrow or payment transactions.
+The Customers API is a core part of the PayPetal Merchant Platform.
+It allows merchants to create, manage, update, and remove customers from their account.
+Every customer record serves as a link between your business and the buyer in escrow or payment transactions.
 
-Every customer record contains identifying information such as full name, email address, and phone number.
-This data links directly to transactions, escrow agreements and Payments.
+When you create a customer, PayPetal assigns a unique customerId.
+This ID is used to associate that customer with future payments, escrow agreements, and transaction records.
+The Customers API ensures you have full control over your client database through standard REST endpoints.
+
+All customer-related endpoints require authentication with a Bearer Token.
+Include it in your request headers for every operation:
+
+<br />
+
+```
+Authorization: Bearer <your_jwt_token>
+```
 
 <br />
