@@ -10,6 +10,11 @@ api:
   file: paypetal-api.json
   operationId: get_new-endpoint
 hidden: false
+next:
+  pages:
+    - slug: customer
+      title: Customers
+      type: endpoint
 ---
 Before utilising any other API endpoint, merchants must verify their identity.  Only registered and verified developers or merchants can make payments, set up escrow agreements, or manage clients on the PayPetal platform.
 
