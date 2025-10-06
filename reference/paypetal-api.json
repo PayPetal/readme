@@ -208,12 +208,72 @@
       }
     },
     "/api/v1/customer/{customerId}": {
-      "get": {
+      "put": {
         "description": "",
         "operationId": "get_apiv1customer{customerId}",
         "responses": {
           "200": {
-            "description": ""
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "boolean",
+                      "default": "true"
+                    },
+                    "statusCode": {
+                      "type": "string",
+                      "default": "00"
+                    },
+                    "message": {
+                      "type": "string",
+                      "default": "Customer updated"
+                    },
+                    "dataResponse": {
+                      "type": "object",
+                      "properties": {
+                        "fullname": {
+                          "type": "string",
+                          "default": "Samson"
+                        },
+                        "customerId": {
+                          "type": "string",
+                          "default": "cust_2ad485xzkvvv7n"
+                        },
+                        "email": {
+                          "type": "string",
+                          "default": "samson@gmail.com"
+                        },
+                        "phoneNumber": {
+                          "type": "string",
+                          "default": "08022498362"
+                        },
+                        "createdAt": {
+                          "type": "string",
+                          "format": "date-time",
+                          "default": "2025-10-05T18:58:20.499+00:00"
+                        }
+                      },
+                      "required": [
+                        "fullname",
+                        "customerId",
+                        "email",
+                        "phoneNumber",
+                        "createdAt"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "statusCode",
+                    "message",
+                    "dataResponse"
+                  ]
+                }
+              }
+            }
           }
         },
         "parameters": [
@@ -227,7 +287,30 @@
             "required": true,
             "description": "The ID of the customer record you want to update."
           }
-        ]
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "fullname": {
+                    "type": "string",
+                    "default": "Samson"
+                  },
+                  "email": {
+                    "type": "string",
+                    "default": "samson@gmail.com"
+                  },
+                  "phoneNumber": {
+                    "type": "string",
+                    "default": "08123456789"
+                  }
+                }
+              }
+            }
+          }
+        }
       }
     }
   },
