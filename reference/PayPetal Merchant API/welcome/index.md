@@ -1,4 +1,0 @@
----
-title: welcome
-hidden: false
----
