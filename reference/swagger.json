@@ -1,0 +1,2552 @@
+{
+  "openapi": "3.0.1",
+  "info": {
+    "title": "PayPetal Merchant API",
+    "description": "The PayPetal Merchant API lets you accept payments, manage customers, and hold funds in escrow through a single REST interface.\n\n**Authentication:** All protected endpoints require a JWT Bearer token obtained from `POST /api/auth/login`. Tokens are valid for 7 days.\n\n**Base64 credential format:** `base64(secretKey:appId)`\n\n**Two escrow products:**\n- **TrustCore** — merchant-controlled escrow: you decide when to release or refund funds.\n- **TrustVault** — customer-controlled escrow: funds release when the customer supplies a one-time code.",
+    "contact": {
+      "name": "PayPetal Developer Support",
+      "url": "https://www.paypetalhq.com",
+      "email": "developer@paypetalhq.com"
+    },
+    "version": "1.0"
+  },
+  "servers": [
+    {
+      "url": "https://api.paypetalhq.com",
+      "description": "Production"
+    },
+    {
+      "url": "http://localhost:8080",
+      "description": "Local development"
+    }
+  ],
+  "tags": [
+    {
+      "name": "TrustVault Escrow",
+      "description": "TrustVault is a **customer-controlled** escrow product. Unlike TrustCore, the merchant does not trigger the release — the customer does.\n\n**Typical flow:**\n1. Call `POST /agreement` to create an agreement — you receive a hosted payment URL.\n2. Redirect the customer to the payment URL to fund the escrow.\n3. When the customer is satisfied and ready to release funds, call `PUT /agreement/auth/{reference}` to send them a one-time code by email.\n4. The customer supplies the code to `PUT /agreement/complete/{reference}` to release the funds to the merchant.\n\nThis flow is suited for situations where the buyer controls the release — freelance work, service delivery, peer-to-peer sales."
+    },
+    {
+      "name": "Payments",
+      "description": "Generate hosted payment links and verify transaction status. The customer is redirected to a PayPetal-hosted page to complete payment from their wallet. **Rate limit:** 60 requests per 60-second window per merchant on POST /pay/initiate."
+    },
+    {
+      "name": "Customers",
+      "description": "Manage the end-users registered under your merchant account. A customer record is required before you can add them to a TrustCore escrow agreement as either the payer or receiver. The `customerId` returned on creation is the stable identifier used across all escrow operations."
+    },
+    {
+      "name": "TrustCore Payout Accounts",
+      "description": "Manage the bank payout accounts used for TrustCore escrow releases and refunds.\n\n**Why this is required:** before you can call `PUT /trustcore/{reference}/complete` or `PUT /trustcore/{reference}/refund`, the destination customer must have a verified bank account on file.\n\n**Recommended flow:**\n1. Call `GET /api/v1/account/banks` to retrieve the list of supported banks and their codes.\n2. Call `POST /api/v1/account/bank/validate` to resolve the account number to an account name — confirm this with the customer.\n3. Call `POST /api/v1/escrow/trustcore/payout/{customerId}` to link the validated account."
+    },
+    {
+      "name": "TrustCore Escrow",
+      "description": "TrustCore is PayPetal's **merchant-controlled** escrow product.\n\n**Typical flow:**\n1. Create a customer record for both the buyer (initiator) and seller (counterparty).\n2. Call `POST /trustcores` to create an agreement — you receive a `paymentUrl`.\n3. Redirect the initiator to the payment URL to fund the escrow.\n4. PayPetal fires the `trustcore.payment.paid` webhook when the escrow is funded.\n5. When the transaction is complete, call `PUT /trustcore/{reference}/complete` to release funds to the counterparty.\n6. If the deal falls through, call `PUT /trustcore/{reference}/refund` to return funds to the initiator.\n\nBoth complete and refund require the destination customer to have a bank payout account on file."
+    },
+    {
+      "name": "Authentication",
+      "description": "Exchange your developer credentials for a short-lived JWT Bearer token. All other API endpoints require this token in the `Authorization: Bearer <token>` header. Tokens are valid for **7 days** — rotate before they expire to avoid service interruption."
+    },
+    {
+      "name": "Bank & Account Tools",
+      "description": "List supported Nigerian financial institutions and validate a customer's bank account number before linking it as a TrustCore payout destination."
+    }
+  ],
+  "paths": {
+    "/api/v1/escrow/trustvault/agreement/complete/{reference}": {
+      "put": {
+        "tags": [
+          "TrustVault Escrow"
+        ],
+        "summary": "Complete a TrustVault agreement",
+        "description": "Releases the escrowed funds to the merchant. The customer must supply the one-time code received by email after calling `PUT /agreement/auth/{reference}`.\n\n**What happens:**\n1. PayPetal validates the authorization code.\n2. If valid, the funds are released and the agreement `status` transitions to `COMPLETED`.\n3. If the code is invalid or expired, a 400 error is returned — request a new code via `PUT /agreement/auth/{reference}`.",
+        "operationId": "completeRelease",
+        "parameters": [
+          {
+            "name": "reference",
+            "in": "path",
+            "description": "The agreement `idempotencyKey` or internal reference.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "tv-order-2024-XYZ-001"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompleteAgreementDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Funds released successfully. The agreement `status` is now `COMPLETED`. The merchant's account has been credited.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "example": {
+                    "status": true,
+                    "statusCode": "00",
+                    "message": "Agreement completed successfully",
+                    "dataResponse": {
+                      "id": "tv_agr_abc123",
+                      "idempotencyKey": "tv-order-2024-XYZ-001",
+                      "customerId": "cus_a1b2c3d4e5",
+                      "currency": "NGN",
+                      "amount": 5000,
+                      "type": "ONETIME",
+                      "feePayer": "SENDER",
+                      "description": "Freelance website redesign — Phase 1",
+                      "status": "COMPLETED",
+                      "redirectUrl": "https://yourapp.com/escrow/funded",
+                      "metadata": {
+                        "projectId": "PROJ-001"
+                      },
+                      "createdAt": "2024-07-15T14:00:00.000+00:00"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The code is invalid, expired, or the agreement is not in a completable state. Request a new code via `PUT /agreement/auth/{reference}`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "example": {
+                    "status": false,
+                    "statusCode": "01",
+                    "message": "Invalid or expired authorization code",
+                    "dataResponse": null
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid, or expired Bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "example": {
+                    "statusCode": "01",
+                    "status": "fail",
+                    "statusResponse": "Full authentication is required to access this resource"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/escrow/trustvault/agreement/auth/{reference}": {
+      "put": {
+        "tags": [
+          "TrustVault Escrow"
+        ],
+        "summary": "Request a release authorization code",
+        "description": "Sends a one-time authorization code to the customer's registered email address.\n\nCall this endpoint when the customer confirms they are ready to release the escrowed funds to the merchant. The customer must then supply that code to `PUT /agreement/complete/{reference}` to complete the release.\n\n**Note:** codes expire after a short window. If the customer does not act in time, call this endpoint again to send a new code.",
+        "operationId": "requestAuth",
+        "parameters": [
+          {
+            "name": "reference",
+            "in": "path",
+            "description": "The agreement `idempotencyKey` or internal reference.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "tv-order-2024-XYZ-001"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Authorization code sent successfully. Instruct the customer to check their email and supply the code to the complete endpoint.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "example": {
+                    "status": true,
+                    "statusCode": "00",
+                    "message": "Authorization code sent to customer email",
+                    "dataResponse": null
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Agreement not found, already completed, or not yet funded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "example": {
+                    "status": false,
+                    "statusCode": "01",
+                    "message": "Agreement not found or is not in a releasable state",
+                    "dataResponse": null
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid, or expired Bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "example": {
+                    "statusCode": "01",
+                    "status": "fail",
+                    "statusResponse": "Full authentication is required to access this resource"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/escrow/trustcore/{reference}/refund": {
+      "put": {
+        "tags": [
+          "TrustCore Escrow"
+        ],
+        "summary": "Refund escrow funds",
+        "description": "Returns the escrowed amount to the **initiator** (the buyer/payer).\n\n**Pre-conditions:**\n- The agreement must be in `ONGOING` status.\n- The initiator must have a bank payout account on file — add one via `POST /api/v1/escrow/trustcore/payout/{customerId}`.\n- `payoutStatus` must be `NONE` — you cannot refund after funds have been released.\n- `refundStatus` must be `NONE` — you cannot refund an agreement that has already been refunded.\n\n**What happens next:**\nPayPetal debits the TrustCore wallet, sets `refundStatus` to `PENDING`, and queues the bank transfer. The `trustcore.payment.refund` webhook fires when the refund has been processed.",
+        "operationId": "refundTrustCore",
+        "parameters": [
+          {
+            "name": "reference",
+            "in": "path",
+            "description": "The agreement `referenceId` or internal `transactionId`.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "ORDER-2024-XYZ-001"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Refund queued successfully. The `refundStatus` is now `PENDING`. Listen for the `trustcore.payment.refund` webhook to confirm the bank transfer has been processed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "example": {
+                    "status": "success",
+                    "responseCode": "00",
+                    "message": "Refund initiated successfully",
+                    "responseData": {
+                      "reference": "ORDER-2024-XYZ-001",
+                      "transactionId": "260715140001BIZBZ1RNDSF",
+                      "currency": "NGN",
+                      "amount": 5000,
+                      "status": "ONGOING",
+                      "payoutStatus": "NONE",
+                      "refundStatus": "PENDING",
+                      "createdAt": "2024-07-15T14:00:00.000+00:00"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The refund cannot proceed. Inspect `responseData.code` for the specific reason.\n\nCommon codes: `agreement_not_found`, `payout_completed`, `payout_in_progress`, `already_refunded`, `refund_in_progress`, `missing_payout_account`, `wallet_debit_failed`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "example": {
+                    "status": "error",
+                    "responseCode": "400",
+                    "message": "This agreement has already been refunded.",
+                    "responseData": {
+                      "type": "conflict_error",
+                      "code": "already_refunded",
+                      "message": "This agreement has already been refunded.",
+                      "param": null
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid, or expired Bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "example": {
+                    "statusCode": "01",
+                    "status": "fail",
+                    "statusResponse": "Full authentication is required to access this resource"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/escrow/trustcore/{reference}/complete": {
+      "put": {
+        "tags": [
+          "TrustCore Escrow"
+        ],
+        "summary": "Release escrow funds",
+        "description": "Releases the escrowed amount to the **counterparty** (the seller/receiver).\n\n**Pre-conditions:**\n- The agreement must be in `ONGOING` status (i.e., funded by the initiator).\n- The counterparty must have a bank payout account on file — add one first via `POST /api/v1/escrow/trustcore/payout/{customerId}`.\n- `payoutStatus` must be `NONE` — you cannot release if a payout is already pending, processing, or completed.\n\n**What happens next:**\nPayPetal debits the TrustCore wallet, sets `payoutStatus` to `PENDING`, and queues the bank transfer. The `trustcore.payment.completed` webhook fires when the payout is processed.",
+        "operationId": "completeTrustCore",
+        "parameters": [
+          {
+            "name": "reference",
+            "in": "path",
+            "description": "The agreement `referenceId` or internal `transactionId`.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "ORDER-2024-XYZ-001"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Payout queued successfully. The `payoutStatus` is now `PENDING`. Listen for the `trustcore.payment.completed` webhook to confirm the bank transfer has been processed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "example": {
+                    "status": "success",
+                    "responseCode": "00",
+                    "message": "Payout initiated successfully",
+                    "responseData": {
+                      "reference": "ORDER-2024-XYZ-001",
+                      "transactionId": "260715140001BIZBZ1RNDSF",
+                      "currency": "NGN",
+                      "amount": 5000,
+                      "status": "ONGOING",
+                      "payoutStatus": "PENDING",
+                      "refundStatus": "NONE",
+                      "createdAt": "2024-07-15T14:00:00.000+00:00"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The release cannot proceed. Inspect `responseData.code` for the specific reason.\n\nCommon codes: `agreement_not_found`, `payout_already_completed`, `payout_in_progress`, `missing_payout_account`, `wallet_debit_failed`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "example": {
+                    "status": "error",
+                    "responseCode": "400",
+                    "message": "The receiver does not have a payout account. Add one via the /trustcore/accounts endpoint.",
+                    "responseData": {
+                      "type": "validation_error",
+                      "code": "missing_payout_account",
+                      "message": "The receiver does not have a payout account. Add one via the /trustcore/accounts endpoint.",
+                      "param": null
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid, or expired Bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "example": {
+                    "statusCode": "01",
+                    "status": "fail",
+                    "statusResponse": "Full authentication is required to access this resource"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/escrow/trustcore/payout/{customerId}": {
+      "put": {
+        "tags": [
+          "TrustCore Payout Accounts"
+        ],
+        "summary": "Update a payout account",
+        "description": "Replaces the existing payout account for a customer with a new validated bank account. The new account must be pre-validated via `POST /api/v1/account/bank/validate` before calling this endpoint.",
+        "operationId": "updatePayoutAccount",
+        "parameters": [
+          {
+            "name": "customerId",
+            "in": "path",
+            "description": "The `customerId` whose payout account to replace.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "cus_seller_002"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Payout account replaced successfully. Future releases and refunds for this customer will go to the new account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "example": {
+                    "status": "success",
+                    "responseCode": "00",
+                    "message": "Operation successful",
+                    "responseData": {
+                      "customerId": "cus_seller_002",
+                      "accountNumber": "9876543210",
+                      "bankCode": "058",
+                      "accountName": "OKAFOR ADAEZE CHIDIMMA",
+                      "createdAt": "2024-07-15T13:00:00.000+00:00"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The customer was not found or has no existing account to update.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "example": {
+                    "status": "error",
+                    "responseCode": "400",
+                    "message": "No customer found with id 'cus_seller_002'.",
+                    "responseData": {
+                      "type": "resource_not_found",
+                      "code": "customer_not_found",
+                      "message": "No customer found with id 'cus_seller_002'.",
+                      "param": null
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid, or expired Bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "example": {
+                    "statusCode": "01",
+                    "status": "fail",
+                    "statusResponse": "Full authentication is required to access this resource"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "TrustCore Payout Accounts"
+        ],
+        "summary": "Add a payout account",
+        "description": "Links a validated bank account to a customer as their payout destination for TrustCore releases and refunds.\n\n**Important:** the account number must be pre-validated via `POST /api/v1/account/bank/validate` before calling this endpoint. Always confirm the resolved account name with the customer before saving — PayPetal cannot reverse a payout sent to the wrong account.",
+        "operationId": "addPayoutAccount",
+        "parameters": [
+          {
+            "name": "customerId",
+            "in": "path",
+            "description": "The `customerId` to link the bank account to.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "cus_seller_002"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccountDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Payout account linked successfully. This customer can now receive TrustCore payouts and refunds.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "example": {
+                    "status": "success",
+                    "responseCode": "00",
+                    "message": "Operation successful",
+                    "responseData": {
+                      "customerId": "cus_seller_002",
+                      "accountNumber": "0123456789",
+                      "bankCode": "011",
+                      "accountName": "OKAFOR ADAEZE CHIDIMMA",
+                      "createdAt": "2024-07-15T13:00:00.000+00:00"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request failed. The customer may not exist, already have an account on file, or the bank details are invalid.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "example": {
+                    "status": "error",
+                    "responseCode": "400",
+                    "message": "No customer found with id 'cus_seller_002'.",
+                    "responseData": {
+                      "type": "resource_not_found",
+                      "code": "customer_not_found",
+                      "message": "No customer found with id 'cus_seller_002'.",
+                      "param": null
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid, or expired Bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "example": {
+                    "statusCode": "01",
+                    "status": "fail",
+                    "statusResponse": "Full authentication is required to access this resource"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "TrustCore Payout Accounts"
+        ],
+        "summary": "Remove a payout account",
+        "description": "Deletes the bank payout account linked to the given customer. After removal, this customer will not be able to receive TrustCore payouts or refunds until a new account is added.",
+        "operationId": "removePayoutAccount",
+        "parameters": [
+          {
+            "name": "customerId",
+            "in": "path",
+            "description": "The `customerId` whose payout account to remove.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "cus_seller_002"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Payout account removed successfully.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "example": {
+                    "status": "success",
+                    "responseCode": "00",
+                    "message": "Operation successful",
+                    "responseData": null
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The customer was not found or has no payout account to remove.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "example": {
+                    "status": "error",
+                    "responseCode": "400",
+                    "message": "No customer found with id 'cus_seller_002'.",
+                    "responseData": {
+                      "type": "resource_not_found",
+                      "code": "customer_not_found",
+                      "message": "No customer found with id 'cus_seller_002'.",
+                      "param": null
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid, or expired Bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "example": {
+                    "statusCode": "01",
+                    "status": "fail",
+                    "statusResponse": "Full authentication is required to access this resource"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/customer/{customerId}": {
+      "get": {
+        "tags": [
+          "Customers"
+        ],
+        "summary": "Get a customer",
+        "description": "Fetches a single customer record by their `customerId`. The customer must belong to the authenticated merchant account — cross-merchant lookups are not permitted.",
+        "operationId": "fetchCustomer",
+        "parameters": [
+          {
+            "name": "customerId",
+            "in": "path",
+            "description": "The `customerId` returned when the customer was created.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "cus_a1b2c3d4e5"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Customer found and returned.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "example": {
+                    "status": true,
+                    "statusCode": "00",
+                    "message": null,
+                    "dataResponse": {
+                      "customerId": "cus_a1b2c3d4e5",
+                      "fullname": "Adaeze Okafor",
+                      "email": "adaeze@example.com",
+                      "phoneNumber": "+2348012345678",
+                      "createdAt": "2024-07-15T13:00:00.000+00:00"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "No customer exists with this ID under the authenticated merchant account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "example": {
+                    "status": false,
+                    "statusCode": "01",
+                    "message": "Customer not found",
+                    "dataResponse": null
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid, or expired Bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "example": {
+                    "statusCode": "01",
+                    "status": "fail",
+                    "statusResponse": "Full authentication is required to access this resource"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "Customers"
+        ],
+        "summary": "Update a customer",
+        "description": "Updates the profile of an existing customer. Only the fields you include in the request body are changed — omitted fields retain their current values.",
+        "operationId": "updateCustomer",
+        "parameters": [
+          {
+            "name": "customerId",
+            "in": "path",
+            "description": "The `customerId` of the customer to update.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "cus_a1b2c3d4e5"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CustomerDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Customer profile updated. The response reflects the latest saved state of the record.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "example": {
+                    "status": true,
+                    "statusCode": "00",
+                    "message": "Customer updated",
+                    "dataResponse": {
+                      "customerId": "cus_a1b2c3d4e5",
+                      "fullname": "Adaeze Okafor-Nwosu",
+                      "email": "adaeze.new@example.com",
+                      "phoneNumber": "+2348012345678",
+                      "createdAt": "2024-07-15T13:00:00.000+00:00"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "No customer exists with this ID under the authenticated merchant account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "example": {
+                    "status": false,
+                    "statusCode": "01",
+                    "message": "Customer not found",
+                    "dataResponse": null
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid, or expired Bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "example": {
+                    "statusCode": "01",
+                    "status": "fail",
+                    "statusResponse": "Full authentication is required to access this resource"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/pay/initiate": {
+      "post": {
+        "tags": [
+          "Payments"
+        ],
+        "summary": "Initiate a payment",
+        "description": "Creates a pending payment transaction and returns a hosted payment URL. Redirect your customer to `paymentUrl` to complete payment through their PayPetal wallet.\n\n**Idempotency:** supplying a `transactionId` that already exists for a pending transaction returns the existing record instead of creating a new one.\n\n**Rate limit:** 60 requests per 60-second window. Exceeding this returns HTTP 429.",
+        "operationId": "initiatePay",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InitiatePayDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Payment initiated — redirect the customer to the returned `paymentUrl`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "example": {
+                    "status": true,
+                    "statusCode": "00",
+                    "message": null,
+                    "dataResponse": {
+                      "paymentUrl": "https://api.paypetalhq.com/pay?pid=20240715130001ABC",
+                      "data": {
+                        "transactionId": "260715130001ABCBIZ1RAND",
+                        "reference": "20240715130001ABC",
+                        "currency": "NGN",
+                        "amount": 250,
+                        "fee": 3.75,
+                        "totalAmount": 253.75,
+                        "status": "PENDING",
+                        "description": "Order #ORD-9821",
+                        "redirectUrl": "https://shop.example.com/checkout/success"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error or business profile incomplete.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "example": {
+                    "status": false,
+                    "statusCode": "01",
+                    "message": "please set your business info.",
+                    "dataResponse": null
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid, or expired Bearer token.",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded. Parse the retry delay from the response message.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "example": {
+                    "status": false,
+                    "statusCode": "01",
+                    "message": "You have exceeded the allowed number of requests. Try again in 45 second(s).",
+                    "dataResponse": null
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/escrow/trustvault/agreement": {
+      "post": {
+        "tags": [
+          "TrustVault Escrow"
+        ],
+        "summary": "Create a TrustVault agreement",
+        "description": "Creates a new customer-controlled escrow agreement and returns a hosted payment URL.\n\n- Set `type` to `ONETIME` for a single payment, or `MILESTONE` for staged releases (requires the `milestone` field).\n- `feePayer` controls who bears the PayPetal system fee: `SENDER` adds it to what the customer pays; `RECEIVER` deducts it from the payout.\n- Supplying an `idempotencyKey` that already exists returns the original agreement unchanged (idempotent).\n- Redirect the customer to `paymentUrl` to fund the escrow.",
+        "operationId": "createAgreement",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AgreementDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Agreement created. Redirect the customer to `responseData.paymentUrl` to fund the escrow. Once funded, the agreement `status` transitions to `FUNDED`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "example": {
+                    "status": true,
+                    "statusCode": "00",
+                    "message": "Agreement created",
+                    "dataResponse": {
+                      "paymentUrl": "https://api.paypetalhq.com/pay?pid=tv-order-2024-XYZ-001",
+                      "agreement": {
+                        "id": "tv_agr_abc123",
+                        "idempotencyKey": "tv-order-2024-XYZ-001",
+                        "customerId": "cus_a1b2c3d4e5",
+                        "currency": "NGN",
+                        "amount": 5000,
+                        "type": "ONETIME",
+                        "feePayer": "SENDER",
+                        "description": "Freelance website redesign — Phase 1",
+                        "status": "PENDING",
+                        "redirectUrl": "https://yourapp.com/escrow/funded",
+                        "metadata": {
+                          "projectId": "PROJ-001"
+                        },
+                        "createdAt": "2024-07-15T14:00:00.000+00:00"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed, the customer was not found, or the idempotency key conflicts with an existing agreement.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "example": {
+                    "status": false,
+                    "statusCode": "01",
+                    "message": "Customer not found",
+                    "dataResponse": null
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid, or expired Bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "example": {
+                    "statusCode": "01",
+                    "status": "fail",
+                    "statusResponse": "Full authentication is required to access this resource"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/escrow/trustcores": {
+      "get": {
+        "tags": [
+          "TrustCore Escrow"
+        ],
+        "summary": "List customer TrustCore agreements",
+        "description": "Returns a paginated list of all TrustCore agreements where the specified customer is either the initiator (payer) or the counterparty (receiver), scoped to the authenticated merchant account.\n\nResults are ordered by creation date, newest first. Use `page` and `size` to iterate through large sets.",
+        "operationId": "fetchAllByCustomerId",
+        "parameters": [
+          {
+            "name": "customerId",
+            "in": "query",
+            "description": "The `customerId` of the customer whose agreements to retrieve.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "cus_buyer_001"
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "description": "Page number (1-based).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 1
+            },
+            "example": 1
+          },
+          {
+            "name": "size",
+            "in": "query",
+            "description": "Number of records per page.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 10
+            },
+            "example": 10
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Agreements retrieved. `responseData.content` holds the array of agreements. Use `totalPages` and `pageNumber` to build pagination controls in your UI.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "example": {
+                    "status": "success",
+                    "responseCode": "00",
+                    "message": "Records retrieved",
+                    "responseData": {
+                      "content": [
+                        {
+                          "reference": "ORDER-2024-XYZ-001",
+                          "transactionId": "260715140001BIZBZ1RNDSF",
+                          "currency": "NGN",
+                          "amount": 5000,
+                          "merchantChargeAmount": 50,
+                          "description": "iPhone 15 Pro Max 256GB Space Black",
+                          "status": "ONGOING",
+                          "feePayer": "CUSTOMER",
+                          "payoutStatus": "NONE",
+                          "refundStatus": "NONE",
+                          "payerCustomer": {
+                            "customerId": "cus_buyer_001",
+                            "fullname": "Emeka Nwosu",
+                            "email": "emeka@example.com"
+                          },
+                          "receiverCustomer": {
+                            "customerId": "cus_seller_002",
+                            "fullname": "Adaeze Okafor",
+                            "email": "adaeze@example.com"
+                          },
+                          "metadata": {
+                            "productId": "SKU-999",
+                            "orderId": "ORD-12345"
+                          },
+                          "createdAt": "2024-07-15T14:00:00.000+00:00"
+                        }
+                      ],
+                      "totalElements": 1,
+                      "totalPages": 1,
+                      "pageNumber": 1,
+                      "pageSize": 10
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The specified `customerId` does not exist under the authenticated merchant account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "example": {
+                    "status": "error",
+                    "responseCode": "400",
+                    "message": "No customer found with id 'cus_buyer_001'.",
+                    "responseData": {
+                      "type": "resource_not_found",
+                      "code": "customer_not_found",
+                      "message": "No customer found with id 'cus_buyer_001'.",
+                      "param": null
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid, or expired Bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "example": {
+                    "statusCode": "01",
+                    "status": "fail",
+                    "statusResponse": "Full authentication is required to access this resource"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "TrustCore Escrow"
+        ],
+        "summary": "Create a TrustCore agreement",
+        "description": "Creates a new merchant-controlled escrow agreement between two customers and returns a hosted payment URL.\n\n- The **initiator** is the customer who funds the escrow (the buyer).\n- The **counterparty** is the customer who receives the funds on release (the seller).\n- Both must exist as customers under your merchant account.\n- The `referenceId` must be unique per merchant — reusing an existing reference returns a 400 conflict error.\n- Redirect the initiator to `paymentUrl` to complete payment. PayPetal fires the `trustcore.payment.paid` webhook once funded.",
+        "operationId": "createAgreement_1",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InitiateTrustCoreDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Agreement created successfully. Redirect the initiator to `responseData.paymentUrl` to fund the escrow. The `data` object contains the pending transaction details including the fee breakdown.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "example": {
+                    "status": "success",
+                    "responseCode": "00",
+                    "message": "Records retrieved",
+                    "responseData": {
+                      "paymentUrl": "https://api.paypetalhq.com/pay?pid=ORDER-2024-XYZ-001",
+                      "data": {
+                        "transactionId": "260715140001BIZBZ1RNDSF",
+                        "reference": "ORDER-2024-XYZ-001",
+                        "currency": "NGN",
+                        "amount": 5000,
+                        "otherFee": 50,
+                        "fee": 75,
+                        "totalAmount": 5125,
+                        "status": "PENDING",
+                        "description": "iPhone 15 Pro Max 256GB Space Black",
+                        "redirectUrl": "https://yourapp.com/escrow/funded"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request failed validation. Inspect `responseData.type` and `responseData.code` to identify the exact problem.\n\nCommon codes: `invalid_amount`, `agreement_exists`, `customer_not_found`, `same_customer`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "example": {
+                    "status": "error",
+                    "responseCode": "400",
+                    "message": "A TrustCore agreement with reference 'ORDER-2024-XYZ-001' already exists.",
+                    "responseData": {
+                      "type": "conflict_error",
+                      "code": "agreement_exists",
+                      "message": "A TrustCore agreement with reference 'ORDER-2024-XYZ-001' already exists.",
+                      "param": null
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid, or expired Bearer token. Re-authenticate via `POST /api/auth/login`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "example": {
+                    "statusCode": "01",
+                    "status": "fail",
+                    "statusResponse": "Full authentication is required to access this resource"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/customer": {
+      "post": {
+        "tags": [
+          "Customers"
+        ],
+        "summary": "Create a customer",
+        "description": "Registers a new end-user under your merchant account. Returns the created record, including the system-generated `customerId`. Store this ID in your own database — you will need it when creating TrustCore agreements.",
+        "operationId": "createCustomer",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CustomerDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Customer registered successfully. The `customerId` in `dataResponse` is the stable identifier for this customer across all PayPetal operations.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "example": {
+                    "status": true,
+                    "statusCode": "00",
+                    "message": "Customer created",
+                    "dataResponse": {
+                      "customerId": "cus_a1b2c3d4e5",
+                      "fullname": "Adaeze Okafor",
+                      "email": "adaeze@example.com",
+                      "phoneNumber": "+2348012345678",
+                      "createdAt": "2024-07-15T13:00:00.000+00:00"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation failed or a customer with the same identity already exists under this merchant account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "example": {
+                    "status": false,
+                    "statusCode": "01",
+                    "message": "Customer already exists",
+                    "dataResponse": null
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid, or expired Bearer token. Re-authenticate via `POST /api/auth/login`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "example": {
+                    "statusCode": "01",
+                    "status": "fail",
+                    "statusResponse": "Full authentication is required to access this resource"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/account/bank/validate": {
+      "post": {
+        "tags": [
+          "Bank & Account Tools"
+        ],
+        "summary": "Validate a bank account",
+        "description": "Resolves a bank account number to the registered account name using the Nigerian banking system. Always call this endpoint first and confirm the returned name with the customer before linking the account as a TrustCore payout destination.",
+        "operationId": "validateBank",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ValidateAccountDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Account resolved successfully.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "example": {
+                    "status": true,
+                    "statusCode": "00",
+                    "dataResponse": {
+                      "accountName": "OKAFOR ADAEZE CHIDIMMA",
+                      "accountNumber": "0123456789",
+                      "bankCode": "011"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Account not found or invalid bank code.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "example": {
+                    "status": false,
+                    "statusCode": "01",
+                    "message": "Account not found",
+                    "dataResponse": null
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid, or expired Bearer token.",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/auth/login": {
+      "post": {
+        "tags": [
+          "Authentication"
+        ],
+        "summary": "Authenticate merchant (JSON)",
+        "description": "Exchange Base64-encoded credentials for a JWT Bearer token.\n\n**How to build the credential:**\n1. Concatenate your Secret Key and App ID with a colon: `secretKey:appId`\n2. Base64-encode the result: `base64('sk_live_abc123:app_xyz789')` → `'c2tfbGl2ZV9hYmMxMjM6YXBwX3h5ejc4OQ=='`\n3. Pass the encoded string as `base64Hashed` in the request body.\n\n**Using the token:**\nInclude the returned `accessToken` in every subsequent request as:\n`Authorization: Bearer eyJhbGciOiJIUzI1NiJ9...`",
+        "operationId": "loginCustomForm",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LoginDto"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Authentication successful. Store the `accessToken` securely — treat it like a password. Check `expireAt` and request a new token before it expires.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "example": {
+                    "status": true,
+                    "statusCode": "00",
+                    "message": null,
+                    "dataResponse": {
+                      "accessToken": "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJhcHBfeHl6Nzg5IiwiaWF0IjoxNzIwNjAwMDAwLCJleHAiOjE3MjEyMDQ4MDB9.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c",
+                      "expireAt": "2024-07-22T13:00:00.000+00:00"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid credentials. Verify that your `secretKey` and `appId` are correct, that the colon separator is present, and that the Base64 encoding has no padding errors.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "example": {
+                    "status": false,
+                    "statusCode": "01",
+                    "message": "Invalid credentials. Please check your secretKey and appId.",
+                    "dataResponse": null
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/transaction/{id}": {
+      "get": {
+        "tags": [
+          "Payments"
+        ],
+        "summary": "Verify a transaction",
+        "description": "Returns the current state of a transaction. Accepts either the `transactionId` (your reference) or the internal `reference` string returned at creation. Call this after a customer returns from the payment page to confirm success before fulfilling the order.",
+        "operationId": "getMethodName",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Your `transactionId` or the internal `reference` string.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "20240715130001ABC"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Transaction found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "example": {
+                    "status": true,
+                    "statusCode": "00",
+                    "message": null,
+                    "dataResponse": {
+                      "transactionId": "20240715130001ABC",
+                      "reference": "260715130001ABCBIZ1RAND",
+                      "currency": "NGN",
+                      "amount": 250,
+                      "fee": 3.75,
+                      "totalAmount": 253.75,
+                      "status": "SUCCESS",
+                      "payer": "customer@example.com",
+                      "description": "Order #ORD-9821",
+                      "metadata": {
+                        "orderId": "ORD-9821"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Transaction not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "example": {
+                    "status": false,
+                    "statusCode": "01",
+                    "message": "Transaction ID not found",
+                    "dataResponse": null
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid, or expired Bearer token.",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/escrow/trustvault/agreements": {
+      "get": {
+        "tags": [
+          "TrustVault Escrow"
+        ],
+        "summary": "List all TrustVault agreements",
+        "description": "Returns a paginated list of all TrustVault agreements for the authenticated merchant. Supports Spring Data `Pageable` query parameters: `page` (0-based), `size`, and `sort` (e.g. `sort=createdAt,desc`).",
+        "operationId": "allAgreements",
+        "parameters": [
+          {
+            "name": "pageable",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/Pageable"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Agreements retrieved. `content` holds the array; use `totalPages` and `number` to paginate.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "example": {
+                    "status": true,
+                    "statusCode": "00",
+                    "message": null,
+                    "dataResponse": {
+                      "content": [
+                        {
+                          "id": "tv_agr_abc123",
+                          "idempotencyKey": "tv-order-2024-XYZ-001",
+                          "customerId": "cus_a1b2c3d4e5",
+                          "currency": "NGN",
+                          "amount": 5000,
+                          "type": "ONETIME",
+                          "feePayer": "SENDER",
+                          "description": "Freelance website redesign — Phase 1",
+                          "status": "FUNDED",
+                          "redirectUrl": "https://yourapp.com/escrow/funded",
+                          "metadata": {
+                            "projectId": "PROJ-001"
+                          },
+                          "createdAt": "2024-07-15T14:00:00.000+00:00"
+                        }
+                      ],
+                      "totalElements": 1,
+                      "totalPages": 1,
+                      "number": 0,
+                      "size": 20
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid, or expired Bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "example": {
+                    "statusCode": "01",
+                    "status": "fail",
+                    "statusResponse": "Full authentication is required to access this resource"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/escrow/trustvault/agreement/{reference}": {
+      "get": {
+        "tags": [
+          "TrustVault Escrow"
+        ],
+        "summary": "Get a TrustVault agreement",
+        "description": "Retrieves a single TrustVault agreement by its `idempotencyKey` or internal reference. Both are accepted interchangeably. Check the `status` field to understand the current state of the agreement: `PENDING` (created, not yet funded), `FUNDED` (funded, awaiting release), `COMPLETED` (funds released), `REFUNDED`.",
+        "operationId": "getAgreement",
+        "parameters": [
+          {
+            "name": "reference",
+            "in": "path",
+            "description": "The agreement `idempotencyKey` or internal reference.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "tv-order-2024-XYZ-001"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Agreement found and returned.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "example": {
+                    "status": true,
+                    "statusCode": "00",
+                    "message": null,
+                    "dataResponse": {
+                      "id": "tv_agr_abc123",
+                      "idempotencyKey": "tv-order-2024-XYZ-001",
+                      "customerId": "cus_a1b2c3d4e5",
+                      "currency": "NGN",
+                      "amount": 5000,
+                      "type": "ONETIME",
+                      "feePayer": "SENDER",
+                      "description": "Freelance website redesign — Phase 1",
+                      "status": "FUNDED",
+                      "redirectUrl": "https://yourapp.com/escrow/funded",
+                      "metadata": {
+                        "projectId": "PROJ-001"
+                      },
+                      "createdAt": "2024-07-15T14:00:00.000+00:00"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "No agreement exists with the given reference under the authenticated merchant account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "example": {
+                    "status": false,
+                    "statusCode": "01",
+                    "message": "Agreement not found",
+                    "dataResponse": null
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid, or expired Bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "example": {
+                    "statusCode": "01",
+                    "status": "fail",
+                    "statusResponse": "Full authentication is required to access this resource"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/escrow/trustcore": {
+      "get": {
+        "tags": [
+          "TrustCore Escrow"
+        ],
+        "summary": "Get a TrustCore agreement",
+        "description": "Retrieves a single TrustCore agreement by its `referenceId` or the internal `transactionId`. Both identifiers are accepted interchangeably. Use this to check the current `status`, `payoutStatus`, and `refundStatus` of an agreement before taking action on it.",
+        "operationId": "fetchByReference",
+        "parameters": [
+          {
+            "name": "reference",
+            "in": "query",
+            "description": "The agreement `referenceId` or internal `transactionId`.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "ORDER-2024-XYZ-001"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Agreement found. Key fields to check: `status` (overall agreement state), `payoutStatus` (payout progress), `refundStatus` (refund progress).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "example": {
+                    "status": "success",
+                    "responseCode": "00",
+                    "message": "Records retrieved",
+                    "responseData": {
+                      "reference": "ORDER-2024-XYZ-001",
+                      "transactionId": "260715140001BIZBZ1RNDSF",
+                      "currency": "NGN",
+                      "amount": 5000,
+                      "merchantChargeAmount": 50,
+                      "description": "iPhone 15 Pro Max 256GB Space Black",
+                      "status": "ONGOING",
+                      "feePayer": "CUSTOMER",
+                      "payoutStatus": "NONE",
+                      "refundStatus": "NONE",
+                      "payerCustomer": {
+                        "customerId": "cus_buyer_001",
+                        "fullname": "Emeka Nwosu",
+                        "email": "emeka@example.com",
+                        "phoneNumber": "+2348012345678"
+                      },
+                      "receiverCustomer": {
+                        "customerId": "cus_seller_002",
+                        "fullname": "Adaeze Okafor",
+                        "email": "adaeze@example.com",
+                        "phoneNumber": "+2348087654321"
+                      },
+                      "metadata": {
+                        "productId": "SKU-999",
+                        "orderId": "ORD-12345"
+                      },
+                      "redirectUrl": "https://yourapp.com/escrow/funded",
+                      "createdAt": "2024-07-15T14:00:00.000+00:00"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "No agreement exists with the given reference or transaction ID under the authenticated merchant account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "example": {
+                    "status": "error",
+                    "responseCode": "400",
+                    "message": "No agreement found with reference or transaction id 'ORDER-2024-XYZ-001'.",
+                    "responseData": {
+                      "type": "resource_not_found",
+                      "code": "agreement_not_found",
+                      "message": "No agreement found with reference or transaction id 'ORDER-2024-XYZ-001'.",
+                      "param": null
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid, or expired Bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "example": {
+                    "statusCode": "01",
+                    "status": "fail",
+                    "statusResponse": "Full authentication is required to access this resource"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/escrow/trustcore/payout": {
+      "get": {
+        "tags": [
+          "TrustCore Payout Accounts"
+        ],
+        "summary": "List all payout accounts",
+        "description": "Returns a paginated list of all customer bank payout accounts registered under the authenticated merchant account.",
+        "operationId": "allPayoutAccount",
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "description": "Page number (1-based).",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 1
+            },
+            "example": 1
+          },
+          {
+            "name": "size",
+            "in": "query",
+            "description": "Number of records per page.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int32",
+              "default": 10
+            },
+            "example": 10
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Payout accounts retrieved. Each record includes the account details and the associated `customerId`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "example": {
+                    "status": "success",
+                    "responseCode": "00",
+                    "message": "Records retrieved",
+                    "responseData": {
+                      "content": [
+                        {
+                          "customerId": "cus_seller_002",
+                          "accountNumber": "0123456789",
+                          "bankCode": "011",
+                          "accountName": "OKAFOR ADAEZE CHIDIMMA",
+                          "createdAt": "2024-07-15T13:00:00.000+00:00"
+                        }
+                      ],
+                      "totalElements": 1,
+                      "totalPages": 1,
+                      "pageNumber": 1,
+                      "pageSize": 10
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid, or expired Bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "example": {
+                    "statusCode": "01",
+                    "status": "fail",
+                    "statusResponse": "Full authentication is required to access this resource"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/customer/all": {
+      "get": {
+        "tags": [
+          "Customers"
+        ],
+        "summary": "List all customers",
+        "description": "Returns all customers registered under the authenticated merchant account. Use the `customerId` from any record to look up escrow agreements or add payout accounts.",
+        "operationId": "fetchAllCustomers",
+        "responses": {
+          "200": {
+            "description": "Customer list returned. An empty array is returned when no customers have been created yet.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "example": {
+                    "status": true,
+                    "statusCode": "00",
+                    "message": null,
+                    "dataResponse": [
+                      {
+                        "customerId": "cus_a1b2c3d4e5",
+                        "fullname": "Adaeze Okafor",
+                        "email": "adaeze@example.com",
+                        "phoneNumber": "+2348012345678",
+                        "createdAt": "2024-07-15T13:00:00.000+00:00"
+                      },
+                      {
+                        "customerId": "cus_f6g7h8i9j0",
+                        "fullname": "Emeka Nwosu",
+                        "email": "emeka@example.com",
+                        "phoneNumber": "+2348098765432",
+                        "createdAt": "2024-07-16T09:00:00.000+00:00"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid, or expired Bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "example": {
+                    "statusCode": "01",
+                    "status": "fail",
+                    "statusResponse": "Full authentication is required to access this resource"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/account/banks": {
+      "get": {
+        "tags": [
+          "Bank & Account Tools"
+        ],
+        "summary": "List supported banks",
+        "description": "Returns the full list of supported Nigerian financial institutions and their CBN bank codes. Use the `code` value when calling `POST /api/v1/account/bank/validate` or adding a payout account.",
+        "operationId": "banks",
+        "responses": {
+          "200": {
+            "description": "Bank list returned.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "example": {
+                    "status": true,
+                    "statusCode": "00",
+                    "dataResponse": [
+                      {
+                        "name": "Access Bank",
+                        "code": "044"
+                      },
+                      {
+                        "name": "First Bank of Nigeria",
+                        "code": "011"
+                      },
+                      {
+                        "name": "Guaranty Trust Bank",
+                        "code": "058"
+                      },
+                      {
+                        "name": "United Bank for Africa",
+                        "code": "033"
+                      },
+                      {
+                        "name": "Zenith Bank",
+                        "code": "057"
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid, or expired Bearer token.",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/customer/delete/{customerId}": {
+      "delete": {
+        "tags": [
+          "Customers"
+        ],
+        "summary": "Delete a customer",
+        "description": "Permanently removes a customer record from your merchant account. This action is irreversible. Any active escrow agreements referencing this customer will not be affected, but you will no longer be able to look up the customer profile.",
+        "operationId": "deleteCustomer",
+        "parameters": [
+          {
+            "name": "customerId",
+            "in": "path",
+            "description": "The `customerId` of the customer to delete.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "cus_a1b2c3d4e5"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Customer deleted successfully. The record has been permanently removed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "example": {
+                    "status": true,
+                    "statusCode": "00",
+                    "message": "Customer deleted",
+                    "dataResponse": null
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "No customer exists with this ID under the authenticated merchant account.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "example": {
+                    "status": false,
+                    "statusCode": "01",
+                    "message": "Customer not found",
+                    "dataResponse": null
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Missing, invalid, or expired Bearer token.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "string",
+                  "example": {
+                    "statusCode": "01",
+                    "status": "fail",
+                    "statusResponse": "Full authentication is required to access this resource"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ApiResponse": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "boolean",
+            "description": "`true` when the operation succeeded; `false` when it failed.",
+            "example": true
+          },
+          "statusCode": {
+            "type": "string",
+            "description": "Application-level result code. `\"00\"` = success, `\"01\"` = error. Always inspect the HTTP status code first, then use this field for finer-grained logic.",
+            "example": "00",
+            "enum": [
+              "00",
+              "01"
+            ]
+          },
+          "message": {
+            "type": "string",
+            "description": "Human-readable description of the result. `null` on most successful responses. On error, this contains a plain-English explanation of what went wrong.",
+            "nullable": true,
+            "example": "Customer created"
+          },
+          "dataResponse": {
+            "type": "object",
+            "description": "The response payload. `null` when `status` is `false`. The exact shape varies by endpoint — refer to each endpoint's 200 response example for the structure.",
+            "nullable": true
+          }
+        },
+        "description": "Standard response envelope returned by all endpoints except TrustCore and TrustVault escrow.\n\n**On success:** `status` is `true`, `statusCode` is `\"00\"`, and `dataResponse` holds the result.\n**On failure:** `status` is `false`, `statusCode` is `\"01\"`, `message` describes the problem, and `dataResponse` is `null`.\n"
+      },
+      "CompleteAgreementDto": {
+        "required": [
+          "code"
+        ],
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "One-time authorization code sent to the customer's registered email address via PUT /api/v1/escrow/trustvault/agreement/auth/{reference}.",
+            "example": "483921"
+          }
+        },
+        "description": "Authorization code required to complete a TrustVault escrow release"
+      },
+      "AccountDto": {
+        "required": [
+          "accountNumber",
+          "bankCode"
+        ],
+        "type": "object",
+        "properties": {
+          "accountNumber": {
+            "type": "string",
+            "description": "Bank account number (pre-validated).",
+            "example": "0123456789"
+          },
+          "bankCode": {
+            "type": "string",
+            "description": "CBN bank code. Retrieve the full list from GET /api/v1/account/banks.",
+            "example": "011"
+          }
+        },
+        "description": "Bank payout account details. The account number must be pre-validated via POST /api/v1/account/bank/validate before linking."
+      },
+      "CustomerDto": {
+        "required": [
+          "fullname"
+        ],
+        "type": "object",
+        "properties": {
+          "fullname": {
+            "type": "string",
+            "description": "Customer's full name.",
+            "example": "Adaeze Okafor"
+          },
+          "email": {
+            "type": "string",
+            "description": "Customer's email address.",
+            "example": "adaeze@example.com"
+          },
+          "phoneNumber": {
+            "type": "string",
+            "description": "Customer's phone number in international format.",
+            "example": "+2348012345678"
+          }
+        },
+        "description": "Customer create / update request"
+      },
+      "InitiatePayDto": {
+        "required": [
+          "amount",
+          "currency",
+          "description",
+          "redirectUrl"
+        ],
+        "type": "object",
+        "properties": {
+          "amount": {
+            "type": "string",
+            "description": "Amount in the smallest currency unit (e.g. kobo for NGN, cents for USD).",
+            "example": "25000"
+          },
+          "currency": {
+            "type": "string",
+            "description": "ISO 4217 currency code.",
+            "example": "NGN",
+            "enum": [
+              "NGN",
+              "USD"
+            ]
+          },
+          "transactionId": {
+            "type": "string",
+            "description": "Your unique reference for this payment (minimum 14 characters). If omitted, PayPetal generates one. Reusing a reference that belongs to an existing pending transaction returns that transaction instead of creating a new one.",
+            "example": "20240715130001ABC"
+          },
+          "description": {
+            "type": "string",
+            "description": "Human-readable description shown on the payment page.",
+            "example": "Order #ORD-9821 — Red Leather Bag"
+          },
+          "redirectUrl": {
+            "type": "string",
+            "description": "URL the customer is redirected to after payment completes.",
+            "example": "https://shop.example.com/checkout/success"
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "description": "Arbitrary key-value data stored with the transaction and returned in webhooks and verify calls unchanged.",
+              "example": {
+                "orderId": "ORD-9821",
+                "customerId": "USR-001"
+              }
+            },
+            "description": "Arbitrary key-value data stored with the transaction and returned in webhooks and verify calls unchanged.",
+            "example": {
+              "orderId": "ORD-9821",
+              "customerId": "USR-001"
+            }
+          }
+        },
+        "description": "Payment initiation request"
+      },
+      "AgreementDto": {
+        "required": [
+          "amount",
+          "currency",
+          "customerId",
+          "description",
+          "feePayer",
+          "idempotencyKey",
+          "redirectUrl",
+          "type"
+        ],
+        "type": "object",
+        "properties": {
+          "idempotencyKey": {
+            "type": "string",
+            "description": "Unique key supplied by your platform. Reusing a key returns the original agreement instead of creating a new one (idempotent).",
+            "example": "tv-order-2024-XYZ-001"
+          },
+          "customerId": {
+            "type": "string",
+            "description": "The `customerId` of the customer funding the escrow. Must exist on your merchant account.",
+            "example": "cus_a1b2c3d4e5"
+          },
+          "currency": {
+            "type": "string",
+            "description": "Currency for the agreement.",
+            "example": "NGN",
+            "enum": [
+              "USD",
+              "NGN",
+              "NGN",
+              "USD"
+            ]
+          },
+          "amount": {
+            "type": "string",
+            "description": "Amount in the smallest currency unit (e.g. kobo for NGN).",
+            "example": "500000"
+          },
+          "type": {
+            "type": "string",
+            "description": "Agreement type. `ONETIME` for a single payment; `MILESTONE` for staged releases. When `MILESTONE`, the `milestone` field is required.",
+            "example": "ONETIME",
+            "enum": [
+              "ONETIME",
+              "MILESTONE",
+              "ONETIME",
+              "MILESTONE"
+            ]
+          },
+          "feePayer": {
+            "type": "string",
+            "description": "Who bears the PayPetal system fee. `SENDER` adds the fee to the amount the customer pays; `RECEIVER` deducts it from the payout.",
+            "example": "SENDER",
+            "enum": [
+              "SENDER",
+              "RECEIVER",
+              "SENDER",
+              "RECEIVER"
+            ]
+          },
+          "description": {
+            "type": "string",
+            "description": "Description of the goods or services covered by this agreement.",
+            "example": "Freelance website redesign — Phase 1"
+          },
+          "redirectUrl": {
+            "type": "string",
+            "description": "URL the customer is redirected to after successfully funding the escrow.",
+            "example": "https://yourapp.com/escrow/funded"
+          },
+          "milestone": {
+            "$ref": "#/components/schemas/MilestonesDto"
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "description": "Arbitrary key-value data stored with the agreement and returned in responses and webhooks unchanged.",
+              "example": {
+                "projectId": "PROJ-001",
+                "clientRef": "CLIENT-42"
+              }
+            },
+            "description": "Arbitrary key-value data stored with the agreement and returned in responses and webhooks unchanged.",
+            "example": {
+              "projectId": "PROJ-001",
+              "clientRef": "CLIENT-42"
+            }
+          }
+        },
+        "description": "TrustVault escrow agreement creation request"
+      },
+      "MilestoneData": {
+        "type": "object",
+        "properties": {
+          "amount": {
+            "type": "string",
+            "description": "If amount is not set, then percentage must be set"
+          },
+          "description": {
+            "type": "string",
+            "description": "Milestone description"
+          }
+        },
+        "description": "Milestone request"
+      },
+      "MilestonesDto": {
+        "type": "object",
+        "properties": {
+          "milestoneType": {
+            "type": "string"
+          },
+          "milestones": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MilestoneData"
+            }
+          }
+        },
+        "description": "Milestone request"
+      },
+      "InitiateTrustCoreDto": {
+        "required": [
+          "amount",
+          "counterparty",
+          "currency",
+          "description",
+          "initiator",
+          "redirectUrl",
+          "referenceId"
+        ],
+        "type": "object",
+        "properties": {
+          "referenceId": {
+            "type": "string",
+            "description": "A unique reference generated by your platform to identify this escrow transaction. This value must be unique for every transaction and is used for reconciliation and tracking.",
+            "example": "ORDER-2024-XYZ-001"
+          },
+          "initiator": {
+            "type": "string",
+            "description": "The unique identifier of the customer initiating the escrow payment. This customer must exist on your platform.",
+            "example": "cus_a1b2c3d4e5"
+          },
+          "counterparty": {
+            "type": "string",
+            "description": "The unique identifier of the customer recieving the escrow payment. This customer must exist on your platform.",
+            "example": "cus_a1b2c3d4e5"
+          },
+          "currency": {
+            "type": "string",
+            "description": "The currency used for the escrow transaction.",
+            "example": "NGN",
+            "enum": [
+              "USD",
+              "NGN"
+            ]
+          },
+          "amount": {
+            "type": "string",
+            "description": "The escrow amount in the smallest currency unit. For example, NGN should be supplied in kobo.",
+            "example": "50000"
+          },
+          "merchantCharge": {
+            "type": "string",
+            "description": "The additional amount your platform charges your customer as your own commission or service fee. This amount is collected on your behalf and is separate from the PayPetal system fee. Set to 0 or omit this field if you do not want to charge an additional amount.",
+            "example": "1000"
+          },
+          "description": {
+            "type": "string",
+            "description": "A brief description of the goods or services covered by this escrow transaction. This description is visible throughout the transaction lifecycle.",
+            "example": "Payment for iPhone 15 Pro Max, 256GB, Space Black"
+          },
+          "redirectUrl": {
+            "type": "string",
+            "description": "The URL to which the customer is redirected after successfully funding the escrow. This URL should be handled by your application.",
+            "example": "https://yourapp.com/escrow/callback"
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "object",
+              "description": "Optional custom data associated with the transaction. TrustCore stores this information and returns it in responses and webhooks without modifying it.",
+              "example": {
+                "productId": "SKU-999",
+                "orderId": "ORD-12345",
+                "color": "Black"
+              }
+            },
+            "description": "Optional custom data associated with the transaction. TrustCore stores this information and returns it in responses and webhooks without modifying it.",
+            "example": {
+              "productId": "SKU-999",
+              "orderId": "ORD-12345",
+              "color": "Black"
+            }
+          }
+        },
+        "description": "Creates a new TrustCore escrow transaction. TrustCore allows your platform to manage the complete escrow experience while PayPetal securely holds and releases funds. You may optionally specify a merchant charge to earn additional revenue from the transaction. PayPetal system fees are calculated separately based on your merchant fee settings, including who is configured to bear the system fee."
+      },
+      "ValidateAccountDto": {
+        "required": [
+          "accountNumber",
+          "bankCode"
+        ],
+        "type": "object",
+        "properties": {
+          "accountNumber": {
+            "type": "string",
+            "description": "10-digit Nigerian bank account number.",
+            "example": "0123456789"
+          },
+          "bankCode": {
+            "type": "string",
+            "description": "CBN bank code. Retrieve the full list from GET /api/v1/account/banks.",
+            "example": "011"
+          }
+        },
+        "description": "Account number validation request"
+      },
+      "LoginDto": {
+        "required": [
+          "base64Hashed"
+        ],
+        "type": "object",
+        "properties": {
+          "base64Hashed": {
+            "type": "string",
+            "description": "Base64 encoding of your credentials in the format `secretKey:appId`. Example: `base64('sk_live_abc123:app_xyz789')` → `'c2tfbGl2ZV9hYmMxMjM6YXBwX3h5ejc4OQ=='`",
+            "example": "c2tfbGl2ZV9hYmMxMjM6YXBwX3h5ejc4OQ=="
+          }
+        },
+        "description": "Authentication request. Encode your credentials as base64(secretKey:appId) before submitting."
+      },
+      "Pageable": {
+        "type": "object",
+        "properties": {
+          "page": {
+            "minimum": 0,
+            "type": "integer",
+            "format": "int32"
+          },
+          "size": {
+            "minimum": 1,
+            "type": "integer",
+            "format": "int32"
+          },
+          "sort": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "securitySchemes": {
+      "BearerAuth": {
+        "type": "http",
+        "description": "JWT obtained from POST /api/auth/login. Valid for 7 days. Format: `Authorization: Bearer <token>`",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      }
+    }
+  }
+}
