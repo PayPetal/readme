@@ -12,11 +12,15 @@
   },
   "servers": [
     {
-      "url": "https://api.paypetalhq.com",
+      "url": "https://api.service.paypetal.co",
       "description": "Production"
     },
     {
-      "url": "http://localhost:8080",
+      "url": "https://api.sandbox.paypetalhq.xyz",
+      "description": "Sandbox"
+    },
+    {
+      "url": "http://localhost:8083",
       "description": "Local development"
     }
   ],
