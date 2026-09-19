@@ -18,10 +18,6 @@
     {
       "url": "https://sandbox.paypetalhq.xyz",
       "description": "Sandbox"
-    },
-    {
-      "url": "http://localhost:8083",
-      "description": "Local development"
     }
   ],
   "tags": [
